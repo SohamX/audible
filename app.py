@@ -27,6 +27,8 @@ def home():
 
 @app.route("/tts", methods=["POST","GET"])
 def tts():
+    if os.path.exists('output.zip'):
+        os.remove('output.zip')
     inp = request.get_json()
     text = inp['text']
     speed = inp['speed']
@@ -43,10 +45,6 @@ def tts():
     bytes_io = io.BytesIO()
     sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
     bytes_io.seek(0)
-
-    # model = whisper.load_model("medium")
-    # result = model.transcribe("output.wav", fp16=False)
-    # print(result)
 
     model = whisper.load_model("medium") # Change this to your desired model
     transcribe = model.transcribe('sound.wav',fp16=False)
@@ -65,8 +63,12 @@ def tts():
 
             zipFile.write('sub.srt')
             zipFile.write('sound.wav')
-
+    if os.path.exists('sub.srt'):
+        os.remove('sub.srt')
+    if os.path.exists('sound.wav'):
+        os.remove('sound.wav')
     return send_file('output.zip', as_attachment=True)
+
 
     # directory = os.getcwd()
     
@@ -98,7 +100,7 @@ def tts():
     # else:
     #     return jsonify({"error": "Unknown voice model"}), 400
     #return "Flask server"
-    # return jsonify({"audio": audio.tolist()}), 200
+    #return jsonify({"audio": audio.tolist()}), 200
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
