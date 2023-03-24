@@ -7,6 +7,17 @@ import io
 import whisper
 import os
 import zipfile
+import nltk
+from nltk.corpus import stopwords
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from nltk.tokenize import sent_tokenize, word_tokenize
+import numpy as np
+from sklearn.decomposition import TruncatedSVD
+nltk.download('stopwords')
+nltk.download('punkt')
+nltk.download('wordnet')
 
 app = Flask(__name__)
 
@@ -25,10 +36,8 @@ CORS(app, resources={
 def home():
     return "Hello, World!"
 
-@app.route("/tts", methods=["POST","GET"])
+@app.route("/tts", methods=["POST"])
 def tts():
-    if os.path.exists('output.zip'):
-        os.remove('output.zip')
     inp = request.get_json()
     text = inp['text']
     speed = inp['speed']
@@ -61,15 +70,20 @@ def tts():
             with open('sub.srt', 'a', encoding='utf-8') as srtFile:
                 srtFile.write(segment)
 
-            zipFile.write('sub.srt')
-            zipFile.write('sound.wav')
+        zipFile.write('sub.srt')
+        zipFile.write('sound.wav')
+    return send_file('output.zip', as_attachment=True)
+
+@app.route("/delete", methods=["GET", "POST"])
+def delete():
+    if os.path.exists('output.zip'):
+        os.remove('output.zip')
     if os.path.exists('sub.srt'):
         os.remove('sub.srt')
     if os.path.exists('sound.wav'):
         os.remove('sound.wav')
-    return send_file('output.zip', as_attachment=True)
-
-
+    print("Deleted")
+    return "Deleted"
     # directory = os.getcwd()
     
     # audiopath='output.wav'
@@ -101,6 +115,61 @@ def tts():
     #     return jsonify({"error": "Unknown voice model"}), 400
     #return "Flask server"
     #return jsonify({"audio": audio.tolist()}), 200
+
+@app.route("/transcribe", methods=["POST"])
+def transcribe():
+    inp = request.get_json()
+    audio = inp['audio']
+    model = whisper.load_model("medium") # Change this to your desired model
+    transcribe = model.transcribe(audio,fp16=False)
+    
+@app.route("/summarise", methods=["GET", "POST"])
+def summarise():
+    inp = request.get_json()
+    text = inp['text']
+    #whisper can summarise audio apparently
+    try:
+        words = text.split()
+        print(words," words")
+        word_count = len(words)
+        stop_words = set(stopwords.words('english'))
+        wordnet_lemmatizer = WordNetLemmatizer()
+        sentences = nltk.sent_tokenize(text)
+        clean_sentences = []
+        for sentence in sentences:
+            words = nltk.word_tokenize(sentence)
+            words = [word.lower() for word in words if word.isalnum() and word.lower() not in stop_words]
+            words = [wordnet_lemmatizer.lemmatize(word) for word in words]
+            clean_sentences.append(' '.join(words))
+        vectorizer = TfidfVectorizer()
+        vectorized_sentences = vectorizer.fit_transform(clean_sentences)
+        svd_model = TruncatedSVD(n_components=1)
+        svd_model.fit(vectorized_sentences)
+        sentence_scores = vectorized_sentences.dot(svd_model.components_.T)
+        threshold = np.mean(sentence_scores)
+        summary = ''
+        for i, sentence in enumerate(sentences):
+            if sentence_scores[i] > threshold:
+                summary += sentence + ' '
+        summary = summary.strip()
+        summary_word = summary.split()
+        summary_count = len(summary_word)
+        summary_count=len(summary_word)
+        print('LSA',summary)
+        if summary_count<=word_count//10:
+            print(10)
+            return  summary
+        else:
+            print(15)
+            x=len(summary) // 15
+            summary=summary[:x+1]
+            summ = summary[:summary.rfind(".") + 1]
+            return  summ
+    except Exception as e:
+        print('elsa', e)
+        return "error"
+        
+
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
