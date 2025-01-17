@@ -1,3 +1,4 @@
+import base64
 from flask import Flask, request, jsonify, make_response, send_file, send_from_directory
 from TTS.api import TTS
 from flask_cors import CORS
@@ -14,6 +15,7 @@ from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.tokenize import sent_tokenize, word_tokenize
 import numpy as np
+import time
 from sklearn.decomposition import TruncatedSVD
 nltk.download('stopwords')
 nltk.download('punkt')
@@ -40,25 +42,104 @@ def home():
 def tts():
     inp = request.get_json()
     text = inp['text']
+    if(text[0]=='"'):
+        text=text[1:]
+    if(text[-1]=='"'):
+        text=text[:-1]
+
+    text = text.replace('“', '')
+    text = text.replace('”', '')
+    text = text.replace('’', '')
+    text = text.replace('‘', '')
+    text = text.replace('"', '')
+    text = text.replace("'", '')
+    text = text.replace("\r", '')
+    text = text.replace("\n", '')
     speed = inp['speed']
-    if speed=='medium':
+    lan = inp['lan']
+    print(text)
+    # if(lan=='en'):
+    if (speed=='medium' and lan=='en'):
         tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC_ph", progress_bar=False, gpu=False)
-    elif speed=='fast':
+        # Split the input text into chunks of maximum length 100 characters
+        text_chunks = [text[i:i+100] for i in range(0, len(text), 100)]
+        
+        audio_chunks = []
+        stock=time.time()
+        for i, chunk in enumerate(text_chunks):
+            audio_chunk = tts.tts(text=chunk)
+            audio_chunks.append(audio_chunk)
+            tts.tts_to_file(chunk, file_path=f"sound_{i}.wav")
+        ond=time.time()
+        print(ond-stock,"for tts")
+        bytes_io = io.BytesIO()
+        audio = np.concatenate(audio_chunks, axis=None)
+        sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
+        bytes_io.seek(0)
+        # Write the audio to a file
+        with open('sound.wav', 'wb') as f:
+            f.write(bytes_io.read())
+        
+        for i in range(len(text_chunks)):
+            if os.path.exists(f"sound_{i}.wav"):
+                os.remove(f"sound_{i}.wav") 
+
+    elif (speed=='fast' and lan=='en'):
         tts = TTS(model_name="tts_models/en/ljspeech/glow-tts", progress_bar=False, gpu=False)
-    elif speed=='slow':
+        stock=time.time()
+        audio=tts.tts(text=text)
+        tts.tts_to_file(text, file_path="sound.wav")
+        ond=time.time()
+        print(ond-stock,"for tts")
+        bytes_io = io.BytesIO()
+        sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
+        bytes_io.seek(0)
+    elif (speed=='slow' and lan=='en'):
+
         tts = TTS(model_name="tts_models/en/ljspeech/vits", progress_bar=False, gpu=False)
+        stock=time.time()
+        audio=tts.tts(text=text)
+        tts.tts_to_file(text, file_path="sound.wav")
+        ond=time.time()
+        print(ond-stock,"for tts")
+        bytes_io = io.BytesIO()
+        sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
+        bytes_io.seek(0)
+    elif(lan=='ga'):
+        try:
+            tts = TTS(model_name="tts_models/ga/cv/vits", progress_bar=False, gpu=False)
+            stock=time.time()
+            audio=tts.tts(text=text)
+            tts.tts_to_file(text, file_path="sound.wav")
+            ond=time.time()
+            print(ond-stock,"for tts")
+            bytes_io = io.BytesIO()
+            sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
+            bytes_io.seek(0)
+        except ZeroDivisionError as e:
+            print("Error:", e)
+        
     else:
         return jsonify({"error": "Unknown voice model"}), 400
-    audio=tts.tts(text=text)
-    tts.tts_to_file(text, file_path="sound.wav")
-    bytes_io = io.BytesIO()
-    sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
-    bytes_io.seek(0)
 
-    model = whisper.load_model("medium") # Change this to your desired model
-    transcribe = model.transcribe('sound.wav',fp16=False)
+    # else:
+    #     return jsonify({"error": "Unknown language"}), 400
+    # audio=tts.tts(text=text)
+    # tts.tts_to_file(text, file_path="sound.wav")
+    # bytes_io = io.BytesIO()
+    # sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
+    # bytes_io.seek(0)
+
+    start = time.time()
+    if(lan=='en'):
+        model = whisper.load_model("base.en") # Change this to your desired model
+        transcribe = model.transcribe('sound.wav',fp16=False)
+    elif(lan=='ga'):
+        model = whisper.load_model("medium") # Change this to your desired model
+        transcribe = model.transcribe('sound.wav',fp16=False, language='German')
     segments = transcribe['segments']
-
+    end = time.time()
+    print(end - start, "for transcribe")
     with zipfile.ZipFile('output.zip', 'w') as zipFile:
         for segment in segments:
             startTime = str(0)+str(timedelta(seconds=int(segment['start'])))+',000'
@@ -74,6 +155,7 @@ def tts():
         zipFile.write('sound.wav')
     return send_file('output.zip', as_attachment=True)
 
+
 @app.route("/delete", methods=["GET", "POST"])
 def delete():
     if os.path.exists('output.zip'):
@@ -84,51 +166,29 @@ def delete():
         os.remove('sound.wav')
     print("Deleted")
     return "Deleted"
-    # directory = os.getcwd()
-    
-    # audiopath='output.wav'
-    # subpath='output.srt'
-    # return send_from_directory(directory, audiopath), send_from_directory(directory, subpath)
-    #return send_file(bytes_io, mimetype='audio/wav', as_attachment=True, download_name='output.wav')
-    
 
-    # audio_file = "output.wav"
-    # return send_file(audio_file, attachment_filename=os.path.basename(audio_file), as_attachment=True)
-    # audio = np.array(audio)  # Convert list to NumPy array
-    # response = make_response(audio.tobytes())
-    # response.headers.set('Content-Type', 'audio/wav')
-    # response.headers.set('Content-Disposition', 'attachment', filename='output.wav')
-    # return response
-    # Run TTS
-    # text = request.json["text"]
-    # lang = request.json["lang"]
-    # voice = request.json["voice"]
-    # if voice == "tts_model":
-    #     audio = tts_service.synthesize(text, lang=lang)
-    # elif voice == "ljspeech_tts_model":
-    #     audio = tts_service.synthesize(text, lang=lang, voice_model_path="tts_models/ljspeech/ljspeech.pth.tar")
-    # elif voice == "ljspeech_fast_tts_model":
-    #     audio = tts_service.synthesize(text, lang=lang, voice_model_path="tts_models/ljspeech/ljspeech_fast.pth.tar")
-    # elif voice == "libritts_tts_model":
-    #     audio = tts_service.synthesize(text, lang=lang, voice_model_path="tts_models/libritts/libritts.pth.tar")
-    # else:
-    #     return jsonify({"error": "Unknown voice model"}), 400
-    #return "Flask server"
-    #return jsonify({"audio": audio.tolist()}), 200
-
-@app.route("/transcribe", methods=["POST"])
-def transcribe():
-    inp = request.get_json()
-    audio = inp['audio']
-    model = whisper.load_model("medium") # Change this to your desired model
-    transcribe = model.transcribe(audio,fp16=False)
     
 @app.route("/summarise", methods=["GET", "POST"])
 def summarise():
     inp = request.get_json()
+    lan = inp['lan']
     text = inp['text']
+    if(text[0]=='"'):
+        text=text[1:]
+    if(text[-1]=='"'):
+        text=text[:-1]
+    text = text.replace('“', '')
+    text = text.replace('”', '')
+    text = text.replace('’', '')
+    text = text.replace('‘', '')
+    text = text.replace('"', '')
+    text = text.replace("'", '')
+    text = text.replace("\r", '')
+    text = text.replace("\n", '')
+    text = text.replace('"\"', '')
     #whisper can summarise audio apparently
     try:
+        start = time.time()
         words = text.split()
         print(words," words")
         word_count = len(words)
@@ -148,28 +208,57 @@ def summarise():
         sentence_scores = vectorized_sentences.dot(svd_model.components_.T)
         threshold = np.mean(sentence_scores)
         summary = ''
+
+        num_sentences = 0
         for i, sentence in enumerate(sentences):
-            if sentence_scores[i] > threshold:
+            if sentence_scores[i] > threshold and num_sentences < 4:
                 summary += sentence + ' '
+                num_sentences += 1
+            elif num_sentences >= 4:
+                break
         summary = summary.strip()
         summary_word = summary.split()
         summary_count = len(summary_word)
         summary_count=len(summary_word)
+        end = time.time()
+        print(end - start)
         print('LSA',summary)
-        if summary_count<=word_count//10:
-            print(10)
-            return  summary
+        if(lan=='en'):
+            tts = TTS(model_name="tts_models/en/ljspeech/glow-tts", progress_bar=False, gpu=False)
+        elif(lan=='ga'):
+            tts = TTS(model_name="tts_models/ga/cv/vits", progress_bar=False, gpu=False)
         else:
-            print(15)
-            x=len(summary) // 15
-            summary=summary[:x+1]
-            summ = summary[:summary.rfind(".") + 1]
-            return  summ
+            return jsonify({"error": "Unknown voice model"}), 400
+        audio=tts.tts(text=summary)
+        tts.tts_to_file(summary, file_path="sound.wav")
+        bytes_io = io.BytesIO()
+        sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
+        bytes_io.seek(0)
+        audio_base64 = base64.b64encode(bytes_io.getvalue()).decode('utf-8')
+        return {'text': summary, 'audio': audio_base64}
+        # if summary_count<=word_count//10:
+        #     print(10)
+        #     return  summary
+        # else:
+        #     print(15)
+        #     x=len(summary) // 15
+        #     summary=summary[:x+1]
+        #     print(summary)
+        #     summ = summary[:summary.rfind(".") + 1]
+        #     print(summ)
+        #     return  summ
     except Exception as e:
         print('elsa', e)
         return "error"
         
-
+ # text = summary
+            # print(summary)
+            # tts = TTS(model_name="tts_models/en/ljspeech/glow-tts", progress_bar=False, gpu=False)
+            # audio=tts.tts(text=text)
+            # tts.tts_to_file(text, file_path="sound.wav")
+            # bytes_io = io.BytesIO()
+            # sf.write(bytes_io, audio, samplerate=22050, format='WAV', subtype='PCM_16')
+            # bytes_io.seek(0)
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
